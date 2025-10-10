@@ -5,6 +5,8 @@ from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel
+import requests
+import os
 
 # --- 1. DEFINE YOUR API ---
 # Create an instance of the FastAPI class
@@ -38,15 +40,35 @@ class CustomerFeatures(BaseModel):
 @app.post("/predict_churn")
 def predict_churn(features: CustomerFeatures):
     """
-    Receives customer features and predicts churn probability.
+    Receives customer features, predicts churn, and sends a Slack alert for high-risk VIPs.
     """
     # Convert the input features to a pandas DataFrame
-    # The model expects a DataFrame with specific column names
     input_df = pd.DataFrame([features.model_dump()])
     
     # Make a prediction
     prediction_proba = model.predict_proba(input_df)[0][1] # Probability of class 1 (churn)
     
+    # --- SLACK ALERT LOGIC ---
+    # Alert if churn probability is high AND the customer is high-value (monetary > 1000)
+    if prediction_proba > 0.75 and features.monetary > 1000:
+        # IMPORTANT: Store your webhook URL securely, e.g., in an environment variable.
+        # For this demo, we'll get it from an environment variable or use a placeholder.
+        slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "YOUR_SLACK_WEBHOOK_URL_HERE")
+        
+        message = (
+            f":warning: High-Risk VIP Customer Alert!\n"
+            f"Churn Probability: *{prediction_proba:.2%}*\n"
+            f"Recency: {features.recency} days\n"
+            f"Frequency: {features.frequency} purchases\n"
+            f"Monetary Value: ${features.monetary:,.2f}"
+        )
+        
+        try:
+            requests.post(slack_webhook_url, json={"text": message})
+            print("Slack alert sent for high-risk customer.")
+        except Exception as e:
+            print(f"Error sending Slack alert: {e}")
+
     # Return the result
     return {
         "churn_probability": round(prediction_proba, 4)
